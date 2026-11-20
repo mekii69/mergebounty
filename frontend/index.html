@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MergeBounty — trustless bounty escrow on GenLayer</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 880px; margin: 0 auto; padding: 24px 16px 64px; line-height: 1.5; }
+    header { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; }
+    h1 { margin: 0; font-size: 1.6rem; }
+    .badge { display: inline-block; padding: 2px 10px; border: 1px solid currentColor; border-radius: 999px; font-size: 0.85rem; }
+    .card { border: 1px solid #8884; border-radius: 12px; padding: 16px; margin-top: 16px; }
+    label { display: block; margin-top: 10px; font-weight: 600; }
+    input, textarea, button { font: inherit; }
+    input, textarea { width: 100%; box-sizing: border-box; padding: 8px; margin-top: 4px; border: 1px solid #8888; border-radius: 8px; background: inherit; color: inherit; }
+    button { padding: 8px 14px; border-radius: 8px; border: 1px solid #8888; background: #2563eb; color: #fff; cursor: pointer; margin-top: 10px; }
+    button.secondary { background: transparent; color: inherit; }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    .status { font-weight: 700; }
+    .status.FUNDED { color: #2563eb; } .status.EVIDENCE { color: #d97706; }
+    .status.RELEASED { color: #16a34a; } .status.REFUNDED { color: #dc2626; }
+    .status.CANCELLED { color: #6b7280; }
+    .muted { opacity: 0.75; font-size: 0.9rem; }
+    .mono { font-family: ui-monospace, monospace; font-size: 0.85rem; overflow-wrap: anywhere; }
+    #log { white-space: pre-wrap; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .actions button { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MergeBounty</h1>
+    <span class="badge">GenLayer Bradbury testnet · chain 4221</span>
+  </header>
+  <p>Trustless bounty escrow settled by live evidence. A client locks test GEN,
+  a worker submits evidence (a URL, e.g. a GitHub pull request), and GenLayer
+  validators fetch the live page and judge with an LLM whether the acceptance
+  criteria are met. Met → the worker is paid. Unmet → the client is refunded.
+  No human judge, no oracle.</p>
+
+  <div class="card" id="wallet-card">
+    <strong>Wallet</strong>
+    <p id="wallet-status" class="muted">Not connected. Reads work without a wallet; writes need MetaMask on Bradbury.</p>
+    <div class="actions">
+      <button id="connect-btn">Connect wallet</button>
+      <button id="refresh-btn" class="secondary">Refresh bounties</button>
+    </div>
+    <p id="account-line" class="mono"></p>
+  </div>
+
+  <div class="card" id="config-warning" hidden>
+    <strong>Contract not deployed yet.</strong>
+    <p class="muted">Set <span class="mono">CONTRACT_ADDRESS</span> in
+    <span class="mono">src/config.js</span> after deploying (see README), then rebuild.</p>
+  </div>
+
+  <div class="card">
+    <strong>Create a bounty</strong>
+    <label>Title <input id="f-title" maxlength="120" placeholder="e.g. Add escrow contract" /></label>
+    <label>Acceptance criteria
+      <textarea id="f-criteria" rows="3" maxlength="2000" placeholder="e.g. The pull request must be merged into main, add contracts/bounty_escrow.py, and pass all checks."></textarea>
+    </label>
+    <label>Amount (test GEN) <input id="f-amount" type="number" min="0.000001" step="any" value="0.1" /></label>
+    <div class="actions"><button id="create-btn">Create bounty (locks GEN in escrow)</button></div>
+    <p id="create-quote" class="muted"></p>
+  </div>
+
+  <h2>Bounties</h2>
+  <div id="bounty-list"><p class="muted">Loading…</p></div>
+
+  <div class="card">
+    <strong>Activity log</strong>
+    <p id="log" class="mono muted">—</p>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

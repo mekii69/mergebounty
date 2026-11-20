@@ -1,0 +1,21 @@
+networks:
+  default: localnet
+
+  localnet:
+    url: "http://127.0.0.1:4000/api"
+    leader_only: false
+
+  studionet: {}
+    # Pre-configured — accounts auto-generated
+
+  # NOTE: no testnet_bradbury section here on purpose. The config loader
+  # resolves ${...} eagerly, so a testnet entry with private-key variables
+  # breaks direct-mode runs when no .env exists. Add it back (with a .env
+  # holding ACCOUNT_PRIVATE_KEY_1/2) only when running studio/integration
+  # tests against testnet_bradbury — see docs/DEPLOY.md.
+
+paths:
+  contracts: "contracts"
+  artifacts: "artifacts"
+
+environment: .env
