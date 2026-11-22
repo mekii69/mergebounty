@@ -1,6 +1,6 @@
 # MergeBounty — trustless bounty escrow settled by live evidence
 
-An **Intelligent Contract** on GenLayer (Bradbury testnet) that removes the
+An **Intelligent Contract** on GenLayer (Studio network, chain 61999) that removes the
 trusted middleman from freelance/bounty payments.
 
 **The problem.** Paying for open work today needs trust: the client fears
@@ -9,8 +9,10 @@ platforms, and human arbitrators are slow, expensive, and themselves
 trusted parties.
 
 **The fix.** A client locks test GEN in escrow with a task (title +
-acceptance criteria). A worker submits evidence as a URL — typically a
-GitHub pull request. GenLayer validators **fetch the live page** and an
+acceptance criteria) and names the authorized worker who will do it.
+Only that worker can submit evidence (a URL — typically a
+GitHub pull request), so an arbitrary first caller cannot become the
+payout recipient. GenLayer validators **fetch the live page** and an
 **LLM judges** whether the evidence meets the criteria. On consensus:
 
 - criteria **met** → escrowed GEN is released to the worker
@@ -31,7 +33,7 @@ movement are both on-chain.
   football prediction market; the Internet Court demo is dispute
   arbitration. MergeBounty is neither: it is an *automated evidence
   verifier* for escrowed work.
-- **Complete code + accurate docs** — contract, 13 passing direct-mode
+- **Complete code + accurate docs** — contract, 16 passing direct-mode
   tests, a frontend that actually calls the contract, and this README.
 - **Testnet only, free only** — no mainnet, no payments beyond test GEN.
 
@@ -39,7 +41,7 @@ movement are both on-chain.
 
 ```
 contracts/bounty_escrow.py     # the Intelligent Contract (BountyEscrow)
-tests/direct/test_bounty_escrow.py  # 13 direct-mode tests (mocked web + LLM)
+tests/direct/test_bounty_escrow.py  # 16 direct-mode tests (mocked web + LLM)
 frontend/                      # Vite + genlayer-js + @genlayer/transaction-kit
   src/main.js  src/config.js  src/fee-profile.json
 docs/
@@ -93,17 +95,23 @@ npm run build    # emits dist/ — host it anywhere static (Netlify, Vercel, GH 
 ```
 
 Set `CONTRACT_ADDRESS` in `frontend/src/config.js` after deploying.
-Reads work without a wallet. Writes need MetaMask on Bradbury (chain 4221)
-and go through `@genlayer/transaction-kit`: the fee quote is shown
-**before** signing, a fee-policy mismatch blocks signing, and the
-transaction is tracked to finalization.
+Reads work without a wallet. Writes need MetaMask on the Studio network
+(chain 61999) and go through `@genlayer/transaction-kit`: the fee quote
+is shown **before** signing, a fee-policy mismatch blocks signing, and
+the transaction is tracked to finalization. When creating a bounty, the
+client names the authorized worker; only that worker can submit
+evidence and receive the payout.
 
 ## Deploy
 
-See [`docs/DEPLOY.md`](docs/DEPLOY.md) — CLI account (encrypted keystore),
-test GEN from the faucet, `genlayer network set testnet-bradbury`,
-`genlayer deploy --contract contracts/bounty_escrow.py`, then verify on the
-explorer and update `frontend/src/config.js`.
+The live deployment is on the GenLayer Studio network (chain 61999):
+contract `0xf85c6Db3A886De786BB69078555A653b10254e99`, deployed
+2026-11-20 via GenLayer Studio, tx
+`0x9fe4a7d631b934d0e4b3242286e693eea793f80f609971e441ecb0816d664720`
+(FINALIZED). The frontend's client chain, contract address, explorer,
+and fee profile all target that same network (see
+`frontend/src/config.js`). [`docs/DEPLOY.md`](docs/DEPLOY.md) documents
+the CLI deploy path used before the Studio deploy.
 
 ## Submit to the GenLayer portal
 
@@ -118,10 +126,9 @@ fields pre-filled. Fallback category: **Intelligent Contracts** (0–500 PTS).
 - GenVM runner pinned in the contract: `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6`
   (the docs' version; the linter notes a newer runner exists — see
   `docs/RESEARCH.md`)
-- Network: Bradbury testnet, chain 4221, RPC
-  `https://rpc-bradbury.genlayer.com`, explorer
-  `https://explorer-bradbury.genlayer.com`, faucet
-  `https://testnet-faucet.genlayer.foundation`
+- Network: GenLayer Studio network, chain 61999, RPC
+  `https://studio.genlayer.com/api`, explorer
+  `https://explorer-studio.genlayer.com`
 
 ## License
 

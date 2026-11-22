@@ -1,19 +1,25 @@
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 """MergeBounty — trustless bounty escrow settled by live evidence.
 
-A client locks GEN in escrow with a task (title + acceptance criteria).
-A worker submits evidence as a URL (typically a GitHub pull request).
-GenLayer validators fetch the live page and an LLM judges whether the
-evidence meets the criteria. On consensus:
-  - criteria met   -> the escrowed GEN is released to the worker
+A client locks GEN in escrow with a task (title + acceptance criteria)
+and names the authorized worker who will do it. Only that worker may
+submit evidence; an arbitrary first caller cannot become the payout
+recipient. GenLayer validators fetch the live evidence page and an LLM
+judges whether the evidence meets the criteria. On consensus:
+  - criteria met   -> the escrowed GEN is released to the bound worker
   - criteria unmet -> the escrowed GEN is refunded to the client
 No human judge, no oracle, no intermediary.
 
 Trust model (v1):
+  - create_bounty() binds the bounty to one authorized worker address
+    supplied by the client. submit_evidence() reverts for any other
+    caller, so front-running the evidence submission cannot steal the
+    payout. The zero address is rejected as a worker at creation.
   - resolve() may be called repeatedly while evidence is submitted; each
     attempt is a fresh fetch + fresh LLM judgement.
   - The client can only cancel BEFORE evidence is submitted. Once evidence
-    is in, only a consensus verdict settles the bounty.
+    is in, only a consensus verdict settles the bounty. To change the
+    worker, cancel (pre-evidence) and recreate the bounty.
   - Known limitation: evidence so ambiguous that validators never agree
     on `met` leaves the bounty unresolved (each resolve attempt simply
     fails consensus and the bounty stays open for a later attempt).
@@ -132,7 +138,7 @@ class BountyEscrow(gl.Contract):
             raise gl.vm.UserError("bounty not found")
 
     @gl.public.write.payable
-    def create_bounty(self, title: str, criteria: str) -> u256:
+    def create_bounty(self, title: str, criteria: str, worker: Address) -> u256:
         value = gl.message.value
         if value == u256(0):
             raise gl.vm.UserError("bounty must lock a non-zero GEN amount")
@@ -140,10 +146,22 @@ class BountyEscrow(gl.Contract):
             raise gl.vm.UserError("title must be 1-120 chars")
         if len(criteria) == 0 or len(criteria) > MAX_CRITERIA_LEN:
             raise gl.vm.UserError("criteria must be 1-2000 chars")
+        # Callers may deliver the worker as raw 20-byte calldata (direct-mode
+        # runner) or as an Address (on-chain ABI decode); normalize to the
+        # contract's Address type before storing or comparing it.
+        if not isinstance(worker, Address):
+            try:
+                worker = Address(worker)
+            except Exception:
+                raise gl.vm.UserError("worker must be a valid 20-byte address")
+        if worker == ZERO_ADDRESS:
+            raise gl.vm.UserError(
+                "bounty must name an authorized worker (non-zero address)"
+            )
         bounty_id = self.next_id
         self.next_id = self.next_id + u256(1)
         self.bounty_client[bounty_id] = gl.message.sender_address
-        self.bounty_worker[bounty_id] = ZERO_ADDRESS
+        self.bounty_worker[bounty_id] = worker
         self.bounty_amount[bounty_id] = value
         self.bounty_title[bounty_id] = title
         self.bounty_criteria[bounty_id] = criteria
@@ -157,12 +175,13 @@ class BountyEscrow(gl.Contract):
         self._require_bounty(bounty_id)
         if self.bounty_status[bounty_id] != STATUS_FUNDED:
             raise gl.vm.UserError("bounty is not open for evidence")
+        if gl.message.sender_address != self.bounty_worker[bounty_id]:
+            raise gl.vm.UserError("only the authorized worker can submit evidence")
         if len(evidence_url) == 0 or len(evidence_url) > MAX_URL_LEN:
             raise gl.vm.UserError("evidence_url must be 1-500 chars")
         if not evidence_url.startswith("https://"):
             raise gl.vm.UserError("evidence_url must start with https://")
         self.bounty_evidence_url[bounty_id] = evidence_url
-        self.bounty_worker[bounty_id] = gl.message.sender_address
         self.bounty_status[bounty_id] = STATUS_EVIDENCE
 
     @gl.public.write

@@ -31,7 +31,7 @@
 <body>
   <header>
     <h1>MergeBounty</h1>
-    <span class="badge">GenLayer Bradbury testnet · chain 4221</span>
+    <span class="badge">GenLayer Studio network · chain 61999</span>
   </header>
   <p>Trustless bounty escrow settled by live evidence. A client locks test GEN,
   a worker submits evidence (a URL, e.g. a GitHub pull request), and GenLayer
@@ -41,7 +41,7 @@
 
   <div class="card" id="wallet-card">
     <strong>Wallet</strong>
-    <p id="wallet-status" class="muted">Not connected. Reads work without a wallet; writes need MetaMask on Bradbury.</p>
+    <p id="wallet-status" class="muted">Not connected. Reads work without a wallet; writes need MetaMask on Studio (chain 61999).</p>
     <div class="actions">
       <button id="connect-btn">Connect wallet</button>
       <button id="refresh-btn" class="secondary">Refresh bounties</button>
@@ -62,6 +62,10 @@
       <textarea id="f-criteria" rows="3" maxlength="2000" placeholder="e.g. The pull request must be merged into main, add contracts/bounty_escrow.py, and pass all checks."></textarea>
     </label>
     <label>Amount (test GEN) <input id="f-amount" type="number" min="0.000001" step="any" value="0.1" /></label>
+    <label>Authorized worker (0x address)
+      <input id="f-worker" maxlength="42" placeholder="e.g. 0x…" />
+    </label>
+    <p class="muted">Only this worker can submit evidence — and only this worker receives the payout if the criteria are met. An arbitrary first caller cannot claim the bounty.</p>
     <div class="actions"><button id="create-btn">Create bounty (locks GEN in escrow)</button></div>
     <p id="create-quote" class="muted"></p>
   </div>

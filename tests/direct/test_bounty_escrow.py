@@ -37,10 +37,10 @@ def _addr_hex(raw: bytes) -> str:
     return ("0x" + raw.hex()).lower()
 
 
-def _create(direct_vm, contract, sender, value=ONE_GEN):
+def _create(direct_vm, contract, sender, worker, value=ONE_GEN):
     direct_vm.sender = sender
     direct_vm.value = value
-    bounty_id = contract.create_bounty("Add escrow contract", CRITERIA)
+    bounty_id = contract.create_bounty("Add escrow contract", CRITERIA, worker)
     direct_vm.value = 0
     return bounty_id
 
@@ -69,9 +69,9 @@ def _mock_merged_pr(direct_vm, met, confidence=90):
     )
 
 
-def test_create_bounty(direct_vm, direct_deploy, direct_alice):
+def test_create_bounty(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract = direct_deploy("contracts/bounty_escrow.py")
-    bounty_id = _create(direct_vm, contract, direct_alice, value=2 * ONE_GEN)
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob, value=2 * ONE_GEN)
     assert int(bounty_id) == 1
     assert int(contract.get_bounty_count()) == 1
     bounty = json.loads(contract.get_bounty(1))
@@ -81,32 +81,47 @@ def test_create_bounty(direct_vm, direct_deploy, direct_alice):
     assert bounty["title"] == "Add escrow contract"
     assert bounty["criteria"] == CRITERIA
     assert bounty["client"].lower() == _addr_hex(direct_alice)
-    assert bounty["worker"] == "0x0000000000000000000000000000000000000000"
+    assert bounty["worker"].lower() == _addr_hex(direct_bob)
     assert bounty["evidence_url"] == ""
     assert contract.get_status(1) == "FUNDED"
 
 
-def test_create_bounty_zero_value_reverts(direct_vm, direct_deploy, direct_alice):
+def test_create_bounty_zero_worker_reverts(
+    direct_vm, direct_deploy, direct_alice
+):
+    contract = direct_deploy("contracts/bounty_escrow.py")
+    direct_vm.sender = direct_alice
+    direct_vm.value = ONE_GEN
+    zero = type(direct_alice)(b"\x00" * 20)
+    with direct_vm.expect_revert("authorized worker"):
+        contract.create_bounty("Add escrow contract", CRITERIA, zero)
+
+
+def test_create_bounty_zero_value_reverts(
+    direct_vm, direct_deploy, direct_alice, direct_bob
+):
     contract = direct_deploy("contracts/bounty_escrow.py")
     direct_vm.sender = direct_alice
     direct_vm.value = 0
     with direct_vm.expect_revert("non-zero"):
-        contract.create_bounty("Add escrow contract", CRITERIA)
+        contract.create_bounty("Add escrow contract", CRITERIA, direct_bob)
 
 
-def test_create_bounty_validation(direct_vm, direct_deploy, direct_alice):
+def test_create_bounty_validation(
+    direct_vm, direct_deploy, direct_alice, direct_bob
+):
     contract = direct_deploy("contracts/bounty_escrow.py")
     direct_vm.sender = direct_alice
     direct_vm.value = ONE_GEN
     with direct_vm.expect_revert("title"):
-        contract.create_bounty("", CRITERIA)
+        contract.create_bounty("", CRITERIA, direct_bob)
     with direct_vm.expect_revert("criteria"):
-        contract.create_bounty("Title", "x" * 2001)
+        contract.create_bounty("Title", "x" * 2001, direct_bob)
 
 
 def test_submit_evidence(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract = direct_deploy("contracts/bounty_escrow.py")
-    bounty_id = _create(direct_vm, contract, direct_alice)
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob)
     _submit(direct_vm, contract, direct_bob, bounty_id)
     bounty = json.loads(contract.get_bounty(bounty_id))
     assert bounty["status"] == "EVIDENCE"
@@ -117,9 +132,47 @@ def test_submit_evidence(direct_vm, direct_deploy, direct_alice, direct_bob):
         _submit(direct_vm, contract, direct_bob, bounty_id)
 
 
+def test_submit_evidence_non_worker_reverts(
+    direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie
+):
+    # Only the bound worker may submit evidence. A rejected attempt must
+    # not consume the slot: the bounty stays FUNDED and the bound worker
+    # can still submit afterwards.
+    contract = direct_deploy("contracts/bounty_escrow.py")
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob)
+    with direct_vm.expect_revert("only the authorized worker"):
+        _submit(direct_vm, contract, direct_charlie, bounty_id)
+    bounty = json.loads(contract.get_bounty(bounty_id))
+    assert bounty["status"] == "FUNDED"
+    assert bounty["evidence_url"] == ""
+    assert bounty["worker"].lower() == _addr_hex(direct_bob)
+    _submit(direct_vm, contract, direct_bob, bounty_id)
+    assert contract.get_status(bounty_id) == "EVIDENCE"
+
+
+def test_first_caller_cannot_steal_payout(
+    direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie
+):
+    # Regression test for the steward's finding: before the fix, the first
+    # caller of submit_evidence became the payout recipient. Now the
+    # front-runner reverts, the bound worker submits, and the payout
+    # recipient recorded on the bounty is the bound worker.
+    contract = direct_deploy("contracts/bounty_escrow.py")
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob)
+    with direct_vm.expect_revert("only the authorized worker"):
+        _submit(direct_vm, contract, direct_charlie, bounty_id)
+    _submit(direct_vm, contract, direct_bob, bounty_id)
+    _mock_merged_pr(direct_vm, met=True)
+    direct_vm.sender = direct_alice
+    contract.resolve_bounty(bounty_id)
+    bounty = json.loads(contract.get_bounty(bounty_id))
+    assert bounty["status"] == "RELEASED"
+    assert bounty["worker"].lower() == _addr_hex(direct_bob)
+
+
 def test_submit_evidence_validation(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract = direct_deploy("contracts/bounty_escrow.py")
-    bounty_id = _create(direct_vm, contract, direct_alice)
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob)
     with direct_vm.expect_revert("https://"):
         _submit(direct_vm, contract, direct_bob, bounty_id, "http://example.com/pr/1")
     with direct_vm.expect_revert("bounty not found"):
@@ -128,7 +181,7 @@ def test_submit_evidence_validation(direct_vm, direct_deploy, direct_alice, dire
 
 def test_resolve_releases_on_met(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract = direct_deploy("contracts/bounty_escrow.py")
-    bounty_id = _create(direct_vm, contract, direct_alice)
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob)
     _submit(direct_vm, contract, direct_bob, bounty_id)
     _mock_merged_pr(direct_vm, met=True)
     direct_vm.sender = direct_alice
@@ -144,7 +197,7 @@ def test_resolve_releases_on_met(direct_vm, direct_deploy, direct_alice, direct_
 
 def test_resolve_refunds_on_unmet(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract = direct_deploy("contracts/bounty_escrow.py")
-    bounty_id = _create(direct_vm, contract, direct_alice)
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob)
     _submit(direct_vm, contract, direct_bob, bounty_id)
     _mock_merged_pr(direct_vm, met=False)
     direct_vm.sender = direct_alice
@@ -160,7 +213,7 @@ def test_resolve_unfetchable_evidence_refunds(
     direct_vm, direct_deploy, direct_alice, direct_bob
 ):
     contract = direct_deploy("contracts/bounty_escrow.py")
-    bounty_id = _create(direct_vm, contract, direct_alice)
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob)
     _submit(direct_vm, contract, direct_bob, bounty_id)
     direct_vm.mock_web(r".*github\.com.*pull/1.*", {"status": 404, "body": "Not Found"})
     direct_vm.sender = direct_alice
@@ -177,7 +230,7 @@ def test_resolve_validator_disagreement(
     direct_vm, direct_deploy, direct_alice, direct_bob
 ):
     contract = direct_deploy("contracts/bounty_escrow.py")
-    bounty_id = _create(direct_vm, contract, direct_alice)
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob)
     _submit(direct_vm, contract, direct_bob, bounty_id)
     _mock_merged_pr(direct_vm, met=True)
     direct_vm.sender = direct_alice
@@ -189,10 +242,10 @@ def test_resolve_validator_disagreement(
 
 
 def test_resolve_without_evidence_reverts(
-    direct_vm, direct_deploy, direct_alice
+    direct_vm, direct_deploy, direct_alice, direct_bob
 ):
     contract = direct_deploy("contracts/bounty_escrow.py")
-    bounty_id = _create(direct_vm, contract, direct_alice)
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob)
     direct_vm.sender = direct_alice
     with direct_vm.expect_revert("no submitted evidence"):
         contract.resolve_bounty(bounty_id)
@@ -200,7 +253,7 @@ def test_resolve_without_evidence_reverts(
 
 def test_cancel_bounty(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract = direct_deploy("contracts/bounty_escrow.py")
-    bounty_id = _create(direct_vm, contract, direct_alice)
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob)
     # Only the client can cancel.
     direct_vm.sender = direct_bob
     with direct_vm.expect_revert("only the bounty client"):
@@ -216,7 +269,7 @@ def test_cancel_after_evidence_reverts(
     direct_vm, direct_deploy, direct_alice, direct_bob
 ):
     contract = direct_deploy("contracts/bounty_escrow.py")
-    bounty_id = _create(direct_vm, contract, direct_alice)
+    bounty_id = _create(direct_vm, contract, direct_alice, direct_bob)
     _submit(direct_vm, contract, direct_bob, bounty_id)
     direct_vm.sender = direct_alice
     with direct_vm.expect_revert("only a funded bounty"):

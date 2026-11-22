@@ -1,17 +1,24 @@
 /**
- * MergeBounty frontend — GenLayer Bradbury testnet (chain 4221).
+ * MergeBounty frontend — GenLayer Studio network (chain 61999).
  *
  * Reads use a wallet-free genlayer-js client. Writes go through
  * @genlayer/transaction-kit: estimate -> verify fee policy -> submit ->
  * track to decided/finalized. The wallet (MetaMask) signs; the user
  * approves the fee quote + value in their wallet before anything is sent.
  *
- * Set CONTRACT_ADDRESS in src/config.js after deploying (see README).
+ * The client chain, contract address, explorer, and fee profile all
+ * target the Studio network — see src/config.js (single source of truth).
  */
 import { createClient } from "genlayer-js";
-import { testnetBradbury } from "genlayer-js/chains";
+import { studionet } from "genlayer-js/chains";
 import { createTransactionKit } from "@genlayer/transaction-kit";
-import { CONTRACT_ADDRESS, EXPLORER_URL } from "./config.js";
+import {
+  CONTRACT_ADDRESS,
+  EXPLORER_URL,
+  RPC_URL,
+  CHAIN_ID,
+  CHAIN_NAME,
+} from "./config.js";
 import feeProfile from "./fee-profile.json";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -44,7 +51,7 @@ function shortAddr(addr) {
 }
 
 // Read-only client (no wallet needed).
-const readClient = createClient({ chain: testnetBradbury });
+const readClient = createClient({ chain: studionet });
 
 let account = null; // checksummed address string once connected
 let kit = null;
@@ -54,7 +61,7 @@ function getKit() {
   if (!account) throw new Error("Connect your wallet first.");
   if (!kit) {
     kit = createTransactionKit({
-      chain: testnetBradbury,
+      chain: studionet,
       provider: window.ethereum,
       account,
       suggestions: feeProfile,
@@ -63,17 +70,17 @@ function getKit() {
   return kit;
 }
 
-async function ensureBradbury() {
+async function ensureStudioNetwork() {
   const chainIdHex = await window.ethereum.request({ method: "eth_chainId" });
-  if (parseInt(chainIdHex, 16) !== 4221) {
+  if (parseInt(chainIdHex, 16) !== CHAIN_ID) {
     await window.ethereum.request({
       method: "wallet_addEthereumChain",
       params: [
         {
-          chainId: "0x107D",
-          chainName: "GenLayer Bradbury Testnet",
+          chainId: `0x${CHAIN_ID.toString(16)}`,
+          chainName: CHAIN_NAME,
           nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
-          rpcUrls: ["https://rpc-bradbury.genlayer.com"],
+          rpcUrls: [RPC_URL],
           blockExplorerUrls: [EXPLORER_URL],
         },
       ],
@@ -87,13 +94,13 @@ async function connectWallet() {
       $("wallet-status").textContent = "No injected wallet found. Install MetaMask to write.";
       return;
     }
-    await ensureBradbury();
+    await ensureStudioNetwork();
     const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
     account = accounts[0];
     kit = null; // rebuild the kit for this account
-    const read = createClient({ chain: testnetBradbury });
+    const read = createClient({ chain: studionet });
     const balance = await read.getBalance({ address: account });
-    $("wallet-status").textContent = `Connected on Bradbury (chain 4221).`;
+    $("wallet-status").textContent = `Connected on Studio (chain ${CHAIN_ID}).`;
     $("account-line").textContent = `${account} · balance ${fromWei(balance)} GEN`;
     $("connect-btn").textContent = "Connected";
     $("connect-btn").disabled = true;
@@ -253,7 +260,12 @@ async function createBounty() {
   const title = $("f-title").value.trim();
   const criteria = $("f-criteria").value.trim();
   const amountStr = $("f-amount").value.trim();
+  const worker = $("f-worker").value.trim();
   if (!title || !criteria) return alert("Title and criteria are required.");
+  if (!/^0x[0-9a-fA-F]{40}$/.test(worker))
+    return alert("Worker address must be a 0x address (40 hex chars).");
+  if (worker.toLowerCase() === ZERO_ADDRESS)
+    return alert("Worker address must not be the zero address.");
   let amount;
   try {
     amount = toWei(amountStr);
@@ -267,7 +279,7 @@ async function createBounty() {
   try {
     // Quote first so the user sees the fee before signing anything.
     const k = getKit();
-    const tx = { kind: "write", address: CONTRACT_ADDRESS, method: "create_bounty", args: [title, criteria] };
+    const tx = { kind: "write", address: CONTRACT_ADDRESS, method: "create_bounty", args: [title, criteria, worker] };
     const quote = await k.estimate({ preset: "standard", userValue: amount }, tx);
     if (quote.verification.status === "mismatch") {
       throw new Error("Fee policy changed since the quote; re-estimate before signing.");
@@ -283,6 +295,7 @@ async function createBounty() {
     $("create-quote").textContent = "Bounty created.";
     $("f-title").value = "";
     $("f-criteria").value = "";
+    $("f-worker").value = "";
     await refreshBounties();
   } catch (err) {
     $("create-quote").textContent = `Failed: ${err?.message || err}`;
